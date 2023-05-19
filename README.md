@@ -35,3 +35,7 @@ Let's ssay you want to get curation rewards from your upvotes, and you want to i
 ```
 hive-archeology-bot hiveuser --curation-reward --tool-creator-share 10
 ```
+
+While the bot is running, you can upvote any post on HIVE and don't worry about if the payout window has expired. The bot will see your upvote, see it if the post you upvoted was old, check if anyone else, using his/her own version of the bot already created a proxy comment for your post, create a new proxy comment if needed, and a few minutes later, upvote the proxy post with the exact weight you voted on the original post with.
+
+If you want to test this bot, feel free to check it out for example with the [chapters from my book](https://hive.blog/fiction/@pibara/ragnarok-conspiracy-index) Ragnarok Conspiracy, or with any other timeless post on HIVE.
