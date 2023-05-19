@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='hive-archeology-bot',
-    version="0.1.1",
+    version="0.1.2",
     description="Hive Archeology Bot",
     long_description="Simple HIVE bot that allows its owner to up-vote valuable timeless HIVE posts.",
     author='Rob Meijer',
@@ -29,5 +29,5 @@ setup(
         'Programming Language :: Python :: 3',
         'Topic :: Software Development :: Libraries :: Python Modules',
     ],
-    install_requires=["base58", "aioflureedb>=0.6.4", "requests<=2.28.1"],
+    install_requires=["lighthive"],
 )
