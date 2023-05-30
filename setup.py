@@ -1,8 +1,9 @@
 from setuptools import setup
+from hive_archeology import VERSION
 
 setup(
     name='hive-archeology-bot',
-    version="0.1.2",
+    version=VERSION,
     description="Hive Archeology Bot",
     long_description="Simple HIVE bot that allows its owner to up-vote valuable timeless HIVE posts.",
     author='Rob Meijer',
