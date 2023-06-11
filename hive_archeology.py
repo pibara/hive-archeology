@@ -6,17 +6,18 @@ import os
 import argparse
 import operator
 from datetime import datetime
-import dateutil
+from dateutil.parser import parse, _parser  # pylint: disable=import-private-name
 from lighthive.client import Client
 from lighthive.datastructures import Operation
 from lighthive.exceptions import RPCNodeException
 
-VERSION = "0.1.4"
+VERSION = "0.1.7"
 AUTHORS = {}
 AUTHORS["hive-archology"] = ["pibara", "croupierbot"]
 AUTHORS["lighthive"] = ["emrebeyler", "emrebeyler"]
 
 def make_body(author, benef, curation_rewards):
+    """Construct the proxy comment"""
     ben2prod = {}
     for key, val in AUTHORS.items():
         ben2prod[val[1]] = key
@@ -115,6 +116,60 @@ class Commenter: # pylint: disable=too-few-public-methods
         self.curation_rewards = curation_rewards
         self.printer = printer
 
+    def _comment_is_candidate(self, comment, author):
+        candidate = None
+        # Fetch the last timeout time to check if a payout already occured
+        last_payout = 0
+        try:
+            last_payout =  parse(comment.get("last_payout", "2020-12-31T23:59:59")).timestamp()
+        except _parser.ParserError as exp:
+            self.printer.error(exp)
+            return None
+        except TypeError as exp:
+            self.printer.error(exp)
+            return None
+        if last_payout < 24 * 3600: # no payout yet, this might be a candidate
+            self.printer.info("Candidate comment hasn't been paid out yet")
+            beneficiaries = comment.get("beneficiaries", [])
+            allow_curation_rewards = comment.get("allow_curation_rewards", False)
+            total_ben_cnt = 0
+            total_ben_val = 0
+            # Check if the comment has the post author set as (>=50%) beneficiary)
+            for beneficiary in beneficiaries:
+                if beneficiary.get("account", "") == author:
+                    self.printer.info("- candidate comment has post author as beneficiary")
+                    if (beneficiary.get("weight", 0) > 7999 or
+                            (allow_curation_rewards and beneficiary.get("weight", 0) > 5999)):
+                        self.printer.notice("- candidate has a sufficient reward share going to the post author")
+                    else:
+                        self.printer.notice("- candidate has insufficient share going to post author, no match")
+            # check if all beneficiaries match either the post author or one of the devs
+            valid_beneficiaries = {author}
+            total_ben_cnt = 0
+            total_ben_val = 0
+            for _, value in AUTHORS.items():
+                valid_beneficiaries.add(value[1])
+            all_ok = True
+            for beneficiary in beneficiaries:
+                if beneficiary.get("account", "") not in valid_beneficiaries:
+                    all_ok = False
+                total_ben_val += beneficiary.get("weight", 0)
+                total_ben_cnt += 1
+            if all_ok:
+                self.printer.info("- all beneficiaries are expected beneficiaries")
+                if total_ben_cnt == 1 or total_ben_cnt == len(valid_beneficiaries):
+                    self.printer.info("- valid amount of beneficiaries for comment")
+                    if total_ben_val == 10000:
+                        self.printer.notice("Benneficiary shares add up to 100%, MATCH")
+                        candidate = [comment.get("author", None), comment.get("permlink", None)]
+                else:
+                    self.printer.info("- invalid amount of beneficiaries for comment, no match")
+            else:
+                self.printer.notice("- at least one of the beneficiaries listed is unknown and unexpected, no match")
+        else:
+            self.printer.info("Paid out already, no match")
+        return candidate
+
     def comment(self, author, permlink, weight): # pylint: disable=too-many-locals, too-many-branches, too-many-statements
         """Check is an active proxy comment exists, and if not, create one. Either way, mark for upvote by voter"""
         candidate = None
@@ -128,53 +183,7 @@ class Commenter: # pylint: disable=too-few-public-methods
         for comment in comments: # pylint: disable = too-many-nested-blocks
             # One candidate is enough
             if candidate is None: # pylint: disable=too-many-statements
-                # Fetch the last timeout time to check if a payout already occured
-                last_payout = 0
-                try:
-                    last_payout =  dateutil.parser.parse(comment.get("last_payout", "2020-12-31T23:59:59")).timestamp()
-                except RPCNodeException as exp:
-                    self.printer.error(exp)
-                    last_payout = time.time()
-                if last_payout < 24 * 3600: # no payout yet, this might be a candidate
-                    self.printer.info("Candidate comment hasn't been paid out yet")
-                    beneficiaries = comment.get("beneficiaries", [])
-                    allow_curation_rewards = comment.get("allow_curation_rewards", False)
-                    total_ben_cnt = 0
-                    total_ben_val = 0
-                    # Check if the comment has the post author set as (>=50%) beneficiary)
-                    for beneficiary in beneficiaries:
-                        if beneficiary.get("account", "") == author:
-                            self.printer.info("- candidate comment has post author as beneficiary")
-                            if (beneficiary.get("weight", 0) > 7999 or
-                                    (allow_curation_rewards and beneficiary.get("weight", 0) > 5999)):
-                                self.printer.notice("- candidate has a sufficient reward share going to the post author")
-                            else:
-                                self.printer.notice("- candidate has insufficient share going to post author, no match")
-                    # check if all beneficiaries match either the post author or one of the devs
-                    valid_beneficiaries = {author}
-                    total_ben_cnt = 0
-                    total_ben_val = 0
-                    for _, value in AUTHORS.items():
-                        valid_beneficiaries.add(value[1])
-                    all_ok = True
-                    for beneficiary in beneficiaries:
-                        if beneficiary.get("account", "") not in valid_beneficiaries:
-                            all_ok = False
-                        total_ben_val += beneficiary.get("weight", 0)
-                        total_ben_cnt += 1
-                    if all_ok:
-                        self.printer.info("- all beneficiaries are expected beneficiaries")
-                        if total_ben_cnt == 1 or total_ben_cnt == len(valid_beneficiaries):
-                            self.printer.info("- valid amount of beneficiaries for comment")
-                            if total_ben_val == 10000:
-                                self.printer.notice("Benneficiary shares add up to 100%, MATCH")
-                                candidate = [comment.get("author", None), comment.get("permlink", None)]
-                        else:
-                            self.printer.info("- invalid amount of beneficiaries for comment, no match")
-                    else:
-                        self.printer.notice("- at least one of the beneficiaries listed is unknown and unexpected, no match")
-                else:
-                    self.printer.info("Paid out already, no match")
+                candidate = self._comment_is_candidate(comment, author)
         if candidate is None or candidate[0] is None or candidate[1] is None:
             # If no candidate was found, we create our own comment.
             self.printer.notice("No candidate comments found, creating a new comment")
@@ -245,10 +254,13 @@ class Archology:
     def __init__(self, account, wif, tool_creator_share, curation_rewards, printer, slow): # pylint: disable=too-many-arguments
         self.account = account
         headno = None
-        while headno is None:
+        while headno is None:  # pylint: disable=while-used
             try:
                 headno = Client().get_dynamic_global_properties()["head_block_number"]
             except RPCNodeException as exp:
+                printer.error(exp)
+                time.sleep(5)
+            except KeyError as exp:
                 printer.error(exp)
                 time.sleep(5)
         self.next = headno - 100
@@ -263,16 +275,19 @@ class Archology:
         start_time = time.time()
         # Get the current head block number for the HIVE chain
         headno = None
-        while headno is None:
+        while headno is None:  # pylint: disable=while-used
             try:
                 headno = Client().get_dynamic_global_properties()["head_block_number"]
             except RPCNodeException as exp:
                 self.prnt.error(exp)
                 time.sleep(5)
+            except KeyError as exp:
+                self.prnt.error(exp)
+                time.sleep(5)
         # Figure out how many blocks we need to process
         blocks_left = headno + 1 - self.next
         # Process blocks in groups of at most 100
-        while blocks_left !=0: # pylint: disable=too-many-nested-blocks
+        while blocks_left > 0: # pylint: disable=too-many-nested-blocks, while-used
             # Figure out if we need to process 100 blocks or less
             if blocks_left > 100:
                 count = 100
@@ -283,10 +298,13 @@ class Archology:
             # Fetch the number of blocks that we need to process this time around
             blocks = None
             self.prnt.info("fetching blocks, count =", count)
-            while blocks is None:
+            while blocks is None:  # pylint: disable=while-used
                 try:
                     blocks = Client()('block_api').get_block_range({"starting_block_num": self.next, "count":count})["blocks"]
                 except RPCNodeException as exp:
+                    self.prnt.error(exp)
+                    time.sleep(5)
+                except KeyError as exp:
                     self.prnt.error(exp)
                     time.sleep(5)
             # Process the blocks one by one
@@ -327,17 +345,16 @@ class Archology:
 
     def run(self):
         """Main run function for the bot"""
-        while True:
+        while True:  # pylint: disable=while-used
             # Process all blocks upto head
             duration = self.upto_head()
             # If processing took less than 10 seconds, sleep for a bit
-            if self.slow:
-                sleeptime = 100 - duration
-            else:
-                sleeptime = 10 - duration
-            if sleeptime > 0:
-                self.prnt.info("waiting for :", sleeptime)
-                time.sleep(sleeptime)
+            if (sleeptime := 100 - duration if self.slow else 10 - duration):
+                if sleeptime > 0:
+                    self.prnt.info("waiting for :", sleeptime)
+                    time.sleep(sleeptime)
+                else:
+                    self.prnt.info("no wait needed :", sleeptime)
             # Do at most one pending vote that is waiting long enough
             self.voter.tick()
 
@@ -391,6 +408,8 @@ def _main():
                         action="store_true")
     args = parser.parse_args()
     account = args.account
+    if account == ".":
+        account = os.environ.get("HIVE_ARCHEOLOGY_USER", ".")
     wif = args.wif
     if wif is None:
         wif = os.environ.get(account.upper() + "_WIF",os.environ.get("HIVE_ARCHEOLOGY_WIF",None))
